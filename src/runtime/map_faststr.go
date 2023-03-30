@@ -10,20 +10,29 @@ import (
 )
 
 func mapaccess1_faststr(t *maptype, h *hmap, ky string) unsafe.Pointer {
+	// guan-hint: 竞争校验, if exists then panic
 	if raceenabled && h != nil {
 		callerpc := getcallerpc()
 		racereadpc(unsafe.Pointer(h), callerpc, funcPC(mapaccess1_faststr))
 	}
+	// guan-hint: 对map空指针也可以正常访问
+	// 其行为同元素为0的map一样
+	// var m map[string]int == m:=make(map[string]int)
 	if h == nil || h.count == 0 {
 		return unsafe.Pointer(&zeroVal[0])
 	}
+	// guan-hint: 并发写map校验, if exists then panic
 	if h.flags&hashWriting != 0 {
 		throw("concurrent map read and map write")
 	}
 	key := stringStructOf(&ky)
+
+	// guan-hint: 只有一个bucket的时候
 	if h.B == 0 {
 		// One-bucket table.
 		b := (*bmap)(h.buckets)
+
+		// guan-hint: 如果是短key(len<32), 直接硬比较
 		if key.len < 32 {
 			// short key, doing lots of comparisons is ok
 			for i, kptr := uintptr(0), b.keys(); i < bucketCnt; i, kptr = i+1, add(kptr, 2*sys.PtrSize) {
